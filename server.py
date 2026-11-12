@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Serve the handwriting editor on this computer without accepting uploads."""
+"""Serve only the editor assets, locally or on the LAN, without uploads."""
 
 import argparse
 import errno
 import io
+import ipaddress
 import json
+import re
+import socket
+import subprocess
+import sys
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -14,9 +19,17 @@ import webbrowser
 
 ROOT = Path(__file__).resolve().parent
 APP_ID = "local-pdf-handwriting"
+ASSETS = frozenset({
+    "/index.html", "/style.css", "/src/bootstrap.js", "/src/app.js",
+    "/src/ink.js", "/src/pdf.js", "/src/preferences.js",
+    "/vendor/pdf.min.js", "/vendor/pdf.worker.min.js", "/vendor/pdf-lib.min.js",
+})
+PRIVATE_NETWORKS = tuple(ipaddress.ip_network(value) for value in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+))
 CSP = (
     "default-src 'none'; "
-    "script-src 'self' blob: 'unsafe-eval'; "
+    "script-src 'self' blob:; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' blob: data:; font-src 'self' blob: data:; "
     "connect-src 'self' blob: data:; worker-src 'self' blob:; "
@@ -25,17 +38,35 @@ CSP = (
 )
 
 
-def served_path(url_path):
-    """Reject traversal and symlinks pointing outside the application folder."""
-    path = unquote(urlsplit(url_path).path)
-    if "\x00" in path or "\\" in path or ".." in path.split("/"):
-        return None
-    target = (ROOT / path.lstrip("/")).resolve()
+def request_path(url_path):
     try:
-        target.relative_to(ROOT)
+        parts = urlsplit(url_path)
+        path = unquote(parts.path, errors="strict")
+    except (UnicodeError, ValueError):
+        return None
+    if parts.scheme or parts.netloc or parts.fragment or path != parts.path:
+        return None
+    return path
+
+
+def served_path(url_path):
+    """Expose exactly the browser files, never repository files or documents."""
+    path = request_path(url_path)
+    if path == "/":
+        path = "/index.html"
+    if path not in ASSETS:
+        return None
+    target = ROOT
+    for component in path.lstrip("/").split("/"):
+        target = target / component
+        # Even a symlink into ROOT could point at a private signing key.
+        if target.is_symlink():
+            return None
+    try:
+        target.resolve().relative_to(ROOT.resolve())
     except ValueError:
         return None
-    return target
+    return None if target.is_dir() else target
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -50,15 +81,16 @@ class Handler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def send_head(self):
-        if urlsplit(self.path).path == "/health":
-            payload = json.dumps({"app": APP_ID, "version": 1}).encode("utf-8")
+        if request_path(self.path) == "/health":
+            payload = json.dumps({"app": APP_ID, "version": 2,
+                                  "lan": bool(getattr(self.server, "lan_mode", False))}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             return io.BytesIO(payload)
         if served_path(self.path) is None:
-            self.send_error(403, "Path outside application folder")
+            self.send_error(403, "This resource is not shared")
             return None
         return super().send_head()
 
@@ -85,15 +117,67 @@ class Handler(SimpleHTTPRequestHandler):
     do_CONNECT = reject_write
 
 
-def is_running_editor(url):
+def is_running_editor(url, require_lan=False):
     # A localhost health check must not use a system-configured HTTP proxy.
     opener = build_opener(ProxyHandler({}))
     try:
         with opener.open(url + "health", timeout=1) as response:
             data = json.loads(response.read(4096))
-        return isinstance(data, dict) and data.get("app") == APP_ID
+        return (isinstance(data, dict) and data.get("app") == APP_ID
+                and (not require_lan or data.get("lan") is True))
     except (OSError, ValueError):
         return False
+
+
+def is_private_ipv4(value):
+    try:
+        address = ipaddress.IPv4Address(value)
+        return any(address in network for network in PRIVATE_NETWORKS)
+    except ipaddress.AddressValueError:
+        return False
+
+
+def interface_ipv4():
+    """Use OS interface inventory as a fallback; no third-party dependency."""
+    if sys.platform == "darwin":
+        command = ["/sbin/ifconfig"]
+    elif sys.platform == "win32":
+        command = ["ipconfig"]
+    else:
+        command = ["ip", "-4", "-o", "addr", "show", "up"]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True,
+                                errors="replace", timeout=2, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if sys.platform == "win32":
+        return re.findall(r"IPv4[^:\r\n]*:\s*([0-9.]+)", result.stdout)
+    return re.findall(r"\binet\s+([0-9.]+)", result.stdout)
+
+
+def lan_addresses():
+    candidates = []
+    # UDP connect only asks the OS to select a route; no packet is sent.
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("192.0.2.1", 9))
+            candidates.append(probe.getsockname()[0])
+    except OSError:
+        pass
+    candidates.extend(interface_ipv4())
+    return list(dict.fromkeys(value for value in candidates if is_private_ipv4(value)))
+
+
+def print_access_urls(port, lan):
+    print("本机访问：http://127.0.0.1:{}/".format(port), flush=True)
+    if not lan:
+        return
+    addresses = lan_addresses()
+    for address in addresses:
+        print("手机访问（连接同一局域网）：http://{}:{}/".format(address, port), flush=True)
+    if not addresses:
+        print("未识别到局域网 IPv4 地址。请在系统网络设置中查看本机 IP，"
+              "然后在手机打开 http://本机IP:{}/".format(port), flush=True)
 
 
 def open_editor(url):
@@ -107,29 +191,35 @@ def open_editor(url):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="启动本地 PDF 手写答题工具")
     parser.add_argument("--port", type=int, default=8766, help="本机端口，默认 8766")
+    parser.add_argument("--lan", action="store_true", help="允许同一局域网的手机访问")
     parser.add_argument("--no-open", action="store_true", help="只启动服务，不打开浏览器")
     args = parser.parse_args(argv)
     if not 1 <= args.port <= 65535:
         parser.error("端口须在 1 到 65535 之间")
     url = "http://127.0.0.1:{}/".format(args.port)
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+        server = ThreadingHTTPServer(("0.0.0.0" if args.lan else "127.0.0.1", args.port), Handler)
+        server.lan_mode = args.lan
     except OSError as error:
         if error.errno == errno.EADDRINUSE:
-            if is_running_editor(url):
+            if is_running_editor(url, require_lan=args.lan):
                 print("手写答题工具已在运行：" + url, flush=True)
+                if args.lan:
+                    print_access_urls(args.port, True)
                 if not args.no_open:
                     open_editor(url)
                 return 0
-            print(
-                "端口 {} 已被其他程序占用。请用 --port 8767 等其他端口启动；"
-                "不会结束现有程序。".format(args.port),
-                flush=True,
-            )
+            alternate = 8768 if args.port == 8767 else 8767
+            if args.lan and is_running_editor(url):
+                print("端口 {} 上已有仅本机访问的服务，不能供手机连接。"
+                      "请使用 --lan --port {}；不会停止现有服务。".format(args.port, alternate), flush=True)
+            else:
+                print("端口 {} 已被其他程序占用。请用 --port {} 等其他端口启动；"
+                      "不会结束现有程序。".format(args.port, alternate), flush=True)
         else:
             print("无法启动本地服务：{}".format(error), flush=True)
         return 1
-    print("本地 PDF 手写答题：" + url, flush=True)
+    print_access_urls(args.port, args.lan)
     print("文件在浏览器本机处理。保留此窗口；按 Ctrl+C 停止服务。", flush=True)
     if not args.no_open:
         open_editor(url)
