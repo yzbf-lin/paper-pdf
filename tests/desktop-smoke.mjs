@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const {version:appVersion}=JSON.parse(readFileSync(path.join(root,'package.json'),'utf8'));
 const out=path.join(root,'.cache/desktop-smoke');await fs.mkdir(out,{recursive:true});
 const lib={};globalThis.__testPdf=lib;
 vm.runInThisContext(`(function(exports,module){${readFileSync(path.join(root,'vendor/pdf-lib.min.js'),'utf8')}\n})(globalThis.__testPdf,{});`);delete globalThis.__testPdf;
@@ -60,8 +61,71 @@ try{
     assert.equal(await page.locator('#file-name').textContent(),expected);assert.equal(await page.locator('#strokes').evaluate(n=>n.children.length),1);checks.push('invalid Word leaves existing document and ink intact');
   }
   if(process.env.PAPER_PDF_EXPECT_CURRENT_UPDATE==='1'){
-    const info=await page.evaluate(()=>window.paperDesktop.checkUpdate());assert.equal(info.status,'up_to_date');assert.equal(info.currentVersion,'0.1.0');checks.push('published signed update feed reports current version');
+    const info=await page.evaluate(()=>window.paperDesktop.checkUpdate());assert.equal(info.status,'up_to_date');assert.equal(info.currentVersion,appVersion);assert.equal(info.version,appVersion);checks.push('published signed update feed reports current version');
   }
+  // Exercise fast strokes and interruptions through the real desktop pointer handlers.
+  await page.locator('#clear-page').click();await page.locator('#confirm-dialog button[value="confirm"]').click();
+  const strokeCount=()=>page.locator('#strokes').evaluate(n=>n.children.length);
+  await page.waitForFunction(()=>document.querySelector('#strokes').children.length===0);
+  assert.equal(await strokeCount(),0);
+  const r=await page.locator('#ink-layer').boundingBox();
+  for(let i=0;i<40;i++){
+    const x=r.x+45+(i%10)*22,y=r.y+90+Math.floor(i/10)*24;
+    await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x+12,y+8);await page.mouse.up();
+  }
+  for(let i=0;i<20;i++){await page.mouse.move(r.x+45+i*10,r.y+205);await page.mouse.down();await page.mouse.up();}
+  let expectedCount=60;
+  assert.equal(await strokeCount(),expectedCount);checks.push('40 rapid short strokes and 20 rapid dots are retained');
+  await page.evaluate(()=>{
+    document.querySelector('#ink-layer').addEventListener('pointerdown',event=>{window.__smokePointerId=event.pointerId;},{capture:true});
+  });
+  async function beginStroke(y){
+    await page.mouse.move(r.x+55,r.y+y);await page.mouse.down();await page.mouse.move(r.x+110,r.y+y+10);
+    assert.equal(await page.locator('#preview').evaluate(n=>n.children.length),1);
+  }
+  await beginStroke(230);
+  const capturedId=await page.evaluate(()=>{
+    const layer=document.querySelector('#ink-layer'),id=window.__smokePointerId;
+    if(!layer.hasPointerCapture(id))throw new Error('The real pointer was not captured');
+    window.__smokeLostPointerId=null;
+    layer.addEventListener('lostpointercapture',event=>{window.__smokeLostPointerId=event.pointerId;},{once:true});
+    layer.releasePointerCapture(id);return id;
+  });
+  await page.mouse.move(r.x+112,r.y+242);
+  assert.equal(await page.evaluate(()=>window.__smokeLostPointerId),capturedId);
+  assert.equal(await strokeCount(),++expectedCount,'capture loss retains the visible stroke');
+  await page.mouse.up();assert.equal(await strokeCount(),expectedCount,'late pointerup must not duplicate the stroke');
+  const interruptedInk=await page.locator('#strokes').innerHTML();
+  await page.locator('#undo').click();assert.equal(await strokeCount(),expectedCount-1);
+  await page.locator('#redo').click();assert.equal(await page.locator('#strokes').innerHTML(),interruptedInk);
+  checks.push('real pointer capture loss retains ink exactly once with undo/redo');
+  for(const interruption of ['pointercancel','blur','resize']){
+    await beginStroke(250);
+    await page.evaluate(type=>{
+      if(type==='pointercancel')document.querySelector('#ink-layer').dispatchEvent(new PointerEvent(type,{pointerId:window.__smokePointerId,pointerType:'mouse',bubbles:true}));
+      else window.dispatchEvent(new Event(type));
+    },interruption);
+    if(interruption==='resize')await page.waitForFunction(count=>document.querySelector('#strokes').children.length===count&&document.querySelector('#paper').getAttribute('aria-busy')==='false',expectedCount+1);
+    assert.equal(await strokeCount(),++expectedCount,`${interruption} retains the visible stroke`);
+    await page.mouse.up();assert.equal(await strokeCount(),expectedCount,`${interruption} and late pointerup commit only once`);
+  }
+  checks.push('pointer cancellation, focus loss and resize preserve sampled ink');
+  await beginStroke(275);
+  await page.evaluate(()=>{
+    const layer=document.querySelector('#ink-layer'),pointerId=window.__smokePointerId+1000;
+    for(const type of ['pointercancel','lostpointercapture'])layer.dispatchEvent(new PointerEvent(type,{pointerId,pointerType:'mouse',bubbles:true}));
+  });
+  assert.equal(await strokeCount(),expectedCount);assert.equal(await page.locator('#preview').evaluate(n=>n.children.length),1);
+  await page.mouse.up();assert.equal(await strokeCount(),++expectedCount);checks.push('unrelated pointer interruptions do not affect the active stroke');
+  const completedInk=await page.locator('#strokes').innerHTML();
+  await page.locator('#undo').click();assert.equal(await strokeCount(),expectedCount-1);
+  await page.locator('#redo').click();assert.equal(await strokeCount(),expectedCount);assert.equal(await page.locator('#strokes').innerHTML(),completedInk);
+  const fastDraftPath=await save('#save-draft','fast-ink.pdfink');
+  draft=JSON.parse(await fs.readFile(fastDraftPath,'utf8'));assert.equal(draft.ink[0].length,expectedCount);
+  await page.reload();await page.waitForFunction(()=>document.documentElement.dataset.ready==='true');
+  await menuOpen('打开草稿…',fastDraftPath);
+  await page.waitForFunction(count=>document.querySelector('#strokes').children.length===count&&document.querySelector('#paper').getAttribute('aria-busy')==='false',expectedCount);
+  assert.equal(await page.locator('#strokes').innerHTML(),completedInk);checks.push('fast and interrupted ink survives undo/redo and draft restore');
   await page.screenshot({path:path.join(out,'desktop.png')});
   assert.deepEqual(errors,[]);
   await fs.writeFile(path.join(out,'results.json'),JSON.stringify({packaged:!!packaged,checks,errors,wordTested:!!sourceWord},null,2));

@@ -118,7 +118,9 @@ function finishGesture(cancel) {
   const g=gesture;gesture=null;
   if(layer.hasPointerCapture(g.id))layer.releasePointerCapture(g.id);
   if(g.kind==='pan')return;
-  if(cancel)state.ink[g.page]=g.before;
+  // Losing capture/focus ends the input stream; it is not an undo command.
+  // Keep already visible pen samples, while an interrupted eraser rolls back.
+  if(cancel&&g.kind!=='pen')state.ink[g.page]=g.before;
   else {
     if(g.kind==='pen')state.ink[g.page]=[...g.before,g.stroke];
     if(g.kind==='pen'||state.ink[g.page].length!==g.before.length){state.history.push(g.page,g.before,state.ink[g.page]);markChanged();}
@@ -164,8 +166,9 @@ async function openFile(file,isDraft=false) {
   if(file.size>150000000){toast('文件过大，请使用100 MB以内的 PDF 或对应草稿。',true);return;}
   opening=true;
   try {
+  finishGesture(true);
   if(state.revision!==state.savedRevision&&!await confirmAction('打开另一份文件？','当前笔迹尚未保存。请先取消并保存草稿，或继续放弃当前未保存的修改。'))return;
-  finishGesture(true);busy(true,isDraft?'正在恢复草稿…':'正在打开 PDF…');
+  busy(true,isDraft?'正在恢复草稿…':'正在打开 PDF…');
   let candidate=null;
   try {
     let bytes,ink,name,draft;
