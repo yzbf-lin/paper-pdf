@@ -34,6 +34,7 @@
             <button class="color active" data-color="#202b35" style="--swatch:#202b35" aria-label="黑色" aria-pressed="true"></button>
             <button class="color" data-color="#235bc2" style="--swatch:#235bc2" aria-label="蓝色" aria-pressed="false"></button>
             <button class="color" data-color="#bb3d35" style="--swatch:#bb3d35" aria-label="红色" aria-pressed="false"></button>
+            <button id="custom-color" class="custom-color" aria-haspopup="dialog" aria-label="详细配色"><span id="current-color-swatch" aria-hidden="true"></span><span>配色 <small id="current-color-value">#202B35</small></span></button>
           </div>
           <label class="width-control">粗细 <input id="pen-width" type="range" min="0.7" max="6" step="0.1" value="1.6"><output id="width-value">1.6</output></label>
         </div>
@@ -56,6 +57,25 @@
     </section>
   </main>
   <div id="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="color-dialog" aria-labelledby="color-title">
+    <form id="color-form" novalidate>
+      <h2 id="color-title">配置笔色</h2>
+      <p class="color-description">选择颜色，或输入精确色值。仅影响之后写出的笔迹。</p>
+      <div class="color-picker-row">
+        <label class="color-field">选择颜色<input id="color-picker" type="color" value="#202b35"></label>
+        <label class="color-field color-hex-field">HEX 色值<input id="color-hex" type="text" value="#202B35" placeholder="#202B35" maxlength="16" spellcheck="false" autocomplete="off" aria-describedby="color-error"></label>
+      </div>
+      <div class="color-rgb" role="group" aria-label="RGB 色值">
+        <label class="color-field">红 R<input id="color-r" type="number" min="0" max="255" step="1" value="32" inputmode="numeric" aria-describedby="color-error"></label>
+        <label class="color-field">绿 G<input id="color-g" type="number" min="0" max="255" step="1" value="43" inputmode="numeric" aria-describedby="color-error"></label>
+        <label class="color-field">蓝 B<input id="color-b" type="number" min="0" max="255" step="1" value="53" inputmode="numeric" aria-describedby="color-error"></label>
+      </div>
+      <div class="color-preview"><span>笔迹预览</span><svg viewBox="0 0 220 46" aria-hidden="true"><path id="color-preview-path" d="M8 30Q32 0 42 24T72 22T108 25Q128 4 147 26T208 21" fill="none" stroke="#202b35" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="color-preview-value">#202B35</span></div>
+      <p id="color-error" class="color-error" role="status" hidden></p>
+      <p class="color-memory">颜色、粗细和“仅手写笔”设置会自动记住。</p>
+      <div class="dialog-actions"><button id="color-cancel" type="button">取消</button><button id="color-apply" class="primary" type="submit">应用笔色</button></div>
+    </form>
+  </dialog>
   <dialog id="confirm-dialog"><form method="dialog"><h2 id="confirm-title">确认操作</h2><p id="confirm-message"></p><div class="dialog-actions"><button value="cancel">取消</button><button value="confirm" class="primary">继续</button></div></form></dialog>
   <dialog id="update-dialog"><h2>软件更新</h2><p id="update-status" aria-live="polite"></p><p id="update-notes"></p><div class="dialog-actions"><button id="update-close">关闭</button><button id="update-release" hidden>查看版本</button><button id="update-download" class="primary" hidden>下载新版</button></div></dialog>
   <div id="busy" class="busy" role="status" hidden><div><span class="spinner"></span><span id="busy-text">正在打开 PDF…</span></div></div>

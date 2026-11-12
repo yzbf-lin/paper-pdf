@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-const files=new Set(['/index.html','/style.css','/src/bootstrap.js','/src/app.js','/src/ink.js','/src/pdf.js',
+const files=new Set(['/index.html','/style.css','/src/bootstrap.js','/src/app.js','/src/ink.js','/src/pdf.js','/src/preferences.js',
   '/vendor/pdf.min.js','/vendor/pdf.worker.min.js','/vendor/pdf-lib.min.js']);
 export function resolveAsset(url,root){
   const u=new URL(url);

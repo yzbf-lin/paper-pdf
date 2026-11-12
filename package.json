@@ -1,7 +1,7 @@
 {
   "name": "paper-pdf",
   "productName": "Paper PDF",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "纸上：本地 PDF 手写答题与 Word 转 PDF 桌面工具",
   "author": "yzbf-lin",
   "license": "MIT",

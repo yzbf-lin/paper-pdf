@@ -13,10 +13,14 @@ vm.runInThisContext(`(function(exports,module){${readFileSync(path.join(root,'ve
 const input=await lib.PDFDocument.create();input.addPage([400,500]).drawText('Paper PDF - desktop verification',{x:40,y:420,size:16});
 const inputPath=path.join(out,'input.pdf');await fs.writeFile(inputPath,await input.save());
 const packaged=process.env.PAPER_PDF_EXECUTABLE;
-const app=await electron.launch({...(packaged?{executablePath:path.resolve(packaged),args:[]}:{args:[root]}),env:{...process.env},timeout:60000});
+const userData=await fs.mkdtemp(path.join(out,'profile-'));
+const launch=()=>electron.launch({...(packaged?{executablePath:path.resolve(packaged)}:{}),args:[...(packaged?[]:[root]),`--user-data-dir=${userData}`],env:{...process.env},timeout:60000});
+let app;
 const checks=[],errors=[];
 try{
-  const page=await app.firstWindow();page.setDefaultTimeout(15000);page.on('pageerror',e=>errors.push(e.message));
+  app=await launch();
+  assert.equal(await app.evaluate(({app})=>app.getPath('userData')),userData,'tests must not change the user profile');
+  let page=await app.firstWindow();page.setDefaultTimeout(15000);page.on('pageerror',e=>errors.push(e.message));
   await page.waitForFunction(()=>document.documentElement.dataset.ready==='true');
   assert.ok(await page.locator('#import-word').isVisible());checks.push('desktop bridge and Word import entry');
   async function menuOpen(label,input){
@@ -126,8 +130,65 @@ try{
   await menuOpen('打开草稿…',fastDraftPath);
   await page.waitForFunction(count=>document.querySelector('#strokes').children.length===count&&document.querySelector('#paper').getAttribute('aria-busy')==='false',expectedCount);
   assert.equal(await page.locator('#strokes').innerHTML(),completedInk);checks.push('fast and interrupted ink survives undo/redo and draft restore');
+
+  const originalColor=(await page.locator('#current-color-value').textContent()).trim();
+  await page.locator('#custom-color').click();
+  await page.locator('#color-hex').fill('3a7');
+  assert.equal(await page.locator('#color-picker').inputValue(),'#33aa77');
+  assert.deepEqual(await Promise.all(['r','g','b'].map(channel=>page.locator(`#color-${channel}`).inputValue())),['51','170','119']);
+  for(const [channel,value] of [['r','12'],['g','34'],['b','56']])await page.locator(`#color-${channel}`).fill(value);
+  assert.equal(await page.locator('#color-picker').inputValue(),'#0c2238');
+  assert.equal((await page.locator('#color-hex').inputValue()).toLowerCase(),'#0c2238');
+  await page.locator('#color-picker').evaluate(input=>{input.value='#8a35c7';input.dispatchEvent(new Event('input',{bubbles:true}));});
+  assert.equal((await page.locator('#color-hex').inputValue()).toLowerCase(),'#8a35c7');
+  assert.deepEqual(await Promise.all(['r','g','b'].map(channel=>page.locator(`#color-${channel}`).inputValue())),['138','53','199']);
+  await page.locator('#color-r').fill('300');
+  assert.equal(await page.locator('#color-apply').isDisabled(),true);assert.ok(await page.locator('#color-error').isVisible());
+  assert.equal((await page.locator('#current-color-value').textContent()).trim(),originalColor);
+  await page.locator('#color-hex').fill('#2a6bce');
+  await page.locator('#color-hex').fill('#xyz');assert.equal(await page.locator('#color-apply').isDisabled(),true);
+  await page.locator('#color-hex').fill('#2a6bce');
+  await page.locator('#color-cancel').click();await page.waitForFunction(()=>!document.querySelector('#color-dialog').open);
+  assert.equal((await page.locator('#current-color-value').textContent()).trim(),originalColor);
+  assert.equal(await page.locator('#strokes').innerHTML(),completedInk);
+  checks.push('HEX/RGB/picker stay synchronized; invalid and cancelled edits leave ink settings intact');
+
+  await page.locator('#custom-color').click();await page.locator('#color-hex').fill(' 2a6bce ');
+  await page.screenshot({path:path.join(out,'color-dialog.png')});
+  await page.locator('#color-apply').click();await page.waitForFunction(()=>!document.querySelector('#color-dialog').open);
+  assert.equal((await page.locator('#current-color-value').textContent()).trim(),'#2A6BCE');
+  await page.locator('#pen-width').evaluate(input=>{input.value='3.2';input.dispatchEvent(new Event('input',{bubbles:true}));});
+  await draw();assert.equal(await strokeCount(),expectedCount+1);
+  const newStroke=page.locator('#strokes > :last-child');
+  assert.equal(await newStroke.getAttribute('stroke'),'#2a6bce');assert.equal(await newStroke.getAttribute('stroke-width'),'3.2');
+  assert.equal(await page.locator('#strokes').evaluate((node,count)=>[...node.children].slice(0,count).map(child=>child.outerHTML).join(''),expectedCount),completedInk);
+  const colorDraftPath=await save('#save-draft','color-answer.pdfink');
+  const colorDraft=JSON.parse(await fs.readFile(colorDraftPath,'utf8'));
+  assert.deepEqual(colorDraft.ink[0].slice(0,expectedCount),draft.ink[0]);
+  assert.equal(colorDraft.ink[0].at(-1).color,'#2a6bce');assert.equal(colorDraft.ink[0].at(-1).width,3.2);
+  checks.push('custom color and width reach new strokes and saved drafts without recoloring prior ink');
+  await page.locator('#pen-only').check();await draw();assert.equal(await strokeCount(),expectedCount+1,'pen-only ignores mouse strokes');
+  async function assertPenSettings(color,width,penOnly){
+    assert.equal((await page.locator('#current-color-value').textContent()).trim(),color);
+    assert.equal(await page.locator('#pen-width').inputValue(),width);assert.equal(await page.locator('#width-value').textContent(),width);
+    assert.equal(await page.locator('#pen-only').isChecked(),penOnly);
+  }
+  await page.reload();await page.waitForFunction(()=>document.documentElement.dataset.ready==='true');
+  await assertPenSettings('#2A6BCE','3.2',true);checks.push('color, width and pen-only mode survive a page reload');
+  await app.close();
+  app=await launch();page=await app.firstWindow();page.setDefaultTimeout(15000);page.on('pageerror',e=>errors.push(e.message));
+  await page.waitForFunction(()=>document.documentElement.dataset.ready==='true');
+  await assertPenSettings('#2A6BCE','3.2',true);checks.push('pen settings survive a full application exit and restart');
+  await page.evaluate(()=>localStorage.setItem('paper-pdf.pen-settings.v1','{broken json'));
+  await page.reload();await page.waitForFunction(()=>document.documentElement.dataset.ready==='true');
+  await assertPenSettings('#202B35','1.6',false);checks.push('corrupt persisted settings recover to usable defaults');
+  await menuOpen('打开草稿…',colorDraftPath);
+  await page.waitForFunction(count=>document.querySelector('#strokes').children.length===count&&document.querySelector('#paper').getAttribute('aria-busy')==='false',expectedCount+1);
   await page.screenshot({path:path.join(out,'desktop.png')});
   assert.deepEqual(errors,[]);
   await fs.writeFile(path.join(out,'results.json'),JSON.stringify({packaged:!!packaged,checks,errors,wordTested:!!sourceWord},null,2));
   console.log(JSON.stringify({packaged:!!packaged,checks,errors},null,2));
-}finally{await app.evaluate(({app})=>app.exit()).catch(()=>{});await app.close().catch(()=>{});}
+}finally{
+  if(app){await app.evaluate(({app})=>app.exit()).catch(()=>{});await app.close().catch(()=>{});}
+  await fs.rm(userData,{recursive:true,force:true,maxRetries:5,retryDelay:100});
+}

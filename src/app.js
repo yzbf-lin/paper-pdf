@@ -1,10 +1,13 @@
 import {strokePath,hitsStroke,History,validateInk} from './ink.js';
 import {exportPdf,download,toBase64,fromBase64} from './pdf.js';
+import {normalizeHex,hexToRgb,rgbToHex,loadPenSettings,savePenSettings} from './preferences.js';
 
 const $=id=>document.getElementById(id);
 const svgNS='http://www.w3.org/2000/svg';
+let penStorage;
+try{penStorage=window.localStorage;}catch{}
 const state={pdf:null,bytes:null,name:'',metadata:[],ink:[],page:0,zoom:1,fit:true,
-  tool:'pen',color:'#202b35',width:1.6,penOnly:false,history:new History(),revision:0,savedRevision:0,
+  tool:'pen',...loadPenSettings(penStorage),history:new History(),revision:0,savedRevision:0,
   rendering:false,busy:false,space:false};
 let gesture=null, renderTask=null, renderId=0, toastTimer=null, resizeTimer=null, opening=false;
 const layer=$('ink-layer'), viewport=$('viewport');
@@ -41,6 +44,33 @@ function setTool(tool) {
   $('tool-help').textContent={pen:'直接在纸面书写；按住空格可临时移动。',eraser:'橡皮会擦除碰到的整笔；原 PDF 内容保持不变。',pan:'拖动纸面查看；点击「手写」继续答题。'}[tool];
 }
 function updateCursor(){layer.dataset.tool=state.space?'pan':state.tool;}
+let colorCandidate=null,settingsWarningShown=false;
+function rememberPenSettings(){
+  if(!savePenSettings(penStorage,state)&&!settingsWarningShown){settingsWarningShown=true;toast('当前环境无法记住设置，本次仍可正常使用。',true);}
+}
+function syncPenControls(){
+  document.querySelectorAll('[data-color]').forEach(b=>{const active=b.dataset.color===state.color;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));});
+  $('current-color-swatch').style.backgroundColor=state.color;
+  $('current-color-value').textContent=state.color.toUpperCase();
+  $('custom-color').title=`详细配色 · 当前 ${state.color.toUpperCase()}`;
+  $('pen-width').value=state.width;$('width-value').textContent=state.width.toFixed(1);$('pen-only').checked=state.penOnly;
+}
+function setPenColor(color){state.color=color;syncPenControls();rememberPenSettings();}
+function previewColor(color,source){
+  colorCandidate=color;
+  $('color-apply').disabled=!color;$('color-error').hidden=!!color;
+  for(const id of ['color-hex','color-r','color-g','color-b'])$(id).removeAttribute('aria-invalid');
+  if(!color){
+    $('color-error').textContent=source==='hex'?'请输入 3 位或 6 位 HEX 色值，例如 #235BC2。':'RGB 每项都需要填写 0–255 的整数。';
+    for(const id of source==='hex'?['color-hex']:['color-r','color-g','color-b'])$(id).setAttribute('aria-invalid','true');
+    return;
+  }
+  $('color-picker').value=color;
+  if(source!=='hex')$('color-hex').value=color.toUpperCase();
+  if(source!=='rgb'){const {r,g,b}=hexToRgb(color);$('color-r').value=r;$('color-g').value=g;$('color-b').value=b;}
+  $('color-preview-path').setAttribute('stroke',color);$('color-preview-value').textContent=color.toUpperCase();
+}
+function showColorPicker(){finishGesture(false);previewColor(state.color);$('color-dialog').showModal();$('color-hex').focus();$('color-hex').select();}
 function updatePageList() {
   const buttons=$('page-list').querySelectorAll('.page-item');
   buttons.forEach((b,i)=>{
@@ -228,11 +258,18 @@ $('pdf-file').addEventListener('change',e=>{openFile(e.target.files[0]);e.target
 $('draft-file').addEventListener('change',e=>{openFile(e.target.files[0],true);e.target.value='';});
 $('save-draft').addEventListener('click',saveDraft);$('export-pdf').addEventListener('click',savePdf);
 document.querySelectorAll('button[data-tool]').forEach(b=>b.addEventListener('click',()=>setTool(b.dataset.tool)));
-document.querySelectorAll('[data-color]').forEach(b=>b.addEventListener('click',()=>{
-  state.color=b.dataset.color;document.querySelectorAll('[data-color]').forEach(n=>{n.classList.toggle('active',n===b);n.setAttribute('aria-pressed',String(n===b));});
-}));
-$('pen-width').addEventListener('input',e=>{state.width=Number(e.target.value);$('width-value').textContent=state.width.toFixed(1);});
-$('pen-only').addEventListener('change',e=>{state.penOnly=e.target.checked;toast(state.penOnly?'仅接受手写笔；手指和鼠标不会留下笔迹。':'允许鼠标、手指和手写笔书写。');});
+document.querySelectorAll('[data-color]').forEach(b=>b.addEventListener('click',()=>setPenColor(b.dataset.color)));
+$('custom-color').addEventListener('click',showColorPicker);
+$('color-picker').addEventListener('input',e=>previewColor(normalizeHex(e.target.value),'picker'));
+$('color-hex').addEventListener('input',e=>previewColor(normalizeHex(e.target.value),'hex'));
+for(const id of ['color-r','color-g','color-b'])$(id).addEventListener('input',()=>{
+  const values=['color-r','color-g','color-b'].map(id=>$(id).value.trim());
+  previewColor(values.some(value=>!value)?null:rgbToHex(...values.map(Number)),'rgb');
+});
+$('color-form').addEventListener('submit',e=>{e.preventDefault();if(colorCandidate){setPenColor(colorCandidate);$('color-dialog').close();}});
+$('color-cancel').addEventListener('click',()=>$('color-dialog').close());
+$('pen-width').addEventListener('input',e=>{state.width=Number(e.target.value);$('width-value').textContent=state.width.toFixed(1);rememberPenSettings();});
+$('pen-only').addEventListener('change',e=>{state.penOnly=e.target.checked;rememberPenSettings();toast(state.penOnly?'仅接受手写笔；手指和鼠标不会留下笔迹。':'允许鼠标、手指和手写笔书写。');});
 $('undo').addEventListener('click',()=>historyAction());$('redo').addEventListener('click',()=>historyAction(true));
 $('zoom-in').addEventListener('click',()=>zoomBy(1.2));$('zoom-out').addEventListener('click',()=>zoomBy(1/1.2));
 for(const id of ['fit-width','zoom-value'])$(id).addEventListener('click',()=>{state.fit=true;renderPage();});
@@ -314,7 +351,7 @@ const nav=document.createElement('div');nav.className='page-navigation';
 const prev=document.createElement('button');prev.id='prev-page';prev.textContent='‹';prev.setAttribute('aria-label','上一页');prev.disabled=true;prev.addEventListener('click',()=>goPage(state.page-1));
 const next=document.createElement('button');next.id='next-page';next.textContent='›';next.setAttribute('aria-label','下一页');next.disabled=true;next.addEventListener('click',()=>goPage(state.page+1));
 const statusNode=$('page-status');statusNode.replaceWith(nav);nav.append(prev,statusNode,next);
-setTool('pen');updateControls();
+setTool('pen');syncPenControls();updateControls();
 try {
   if(!window.pdfjsLib||!window.PDFLib)throw new Error('本地 PDF 组件缺失');
   const r=await fetch('/vendor/pdf.worker.min.js');if(!r.ok)throw new Error('本地 PDF worker 缺失');
