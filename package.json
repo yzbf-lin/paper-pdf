@@ -1,0 +1,27 @@
+{
+  "name": "paper-pdf",
+  "productName": "Paper PDF",
+  "version": "0.1.0",
+  "description": "纸上：本地 PDF 手写答题与 Word 转 PDF 桌面工具",
+  "author": "yzbf-lin",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yzbf-lin/paper-pdf.git"
+  },
+  "main": "desktop/main.mjs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.mjs",
+    "test:desktop": "node tests/desktop-smoke.mjs",
+    "build": "node scripts/package.mjs",
+    "release:manifest": "node scripts/release-manifest.mjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "45.3.1",
+    "playwright-core": "1.65.0"
+  }
+}

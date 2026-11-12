@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.DS_Store
+node_modules/
+test-results/
+playwright-report/
+.cache/
+.release-keys/
+build/
+release/
+.stage/
+*.log
+*.pdfink
+*.doc
+*.docx
+.env*

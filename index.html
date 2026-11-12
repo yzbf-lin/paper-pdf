@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>纸上 · 本地 PDF 手写</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%2328473b'/%3E%3Cpath d='M12 27l3-8L27 7l6 6-12 12z' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/src/bootstrap.js"></script><script defer src="/vendor/pdf.min.js"></script><script defer src="/vendor/pdf-lib.min.js"></script>
+  <script type="module" src="/src/app.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="/" aria-label="纸上首页"><span class="brand-mark" aria-hidden="true">纸</span><span>纸上<small>本地 PDF 手写</small></span></a>
+    <div class="document-info"><strong id="file-name">新的一页，从这里开始</strong><span id="save-state">文件只在此设备上处理</span></div>
+    <div class="file-actions"><button id="open-pdf">打开 PDF</button><button id="import-word" hidden>导入 Word</button><button id="open-draft" class="subtle">打开草稿</button><button id="save-draft" disabled>保存草稿</button><button id="export-pdf" class="primary" disabled>导出 PDF <span aria-hidden="true">↗</span></button></div>
+    <input id="pdf-file" type="file" accept="application/pdf,.pdf" hidden><input id="draft-file" type="file" accept="application/json,.json,.pdfink" hidden>
+  </header>
+  <main class="workspace">
+    <aside class="sidebar" aria-label="PDF 页面导航">
+      <div class="sidebar-title"><span>页面</span><span id="page-count">—</span></div>
+      <div id="page-list" class="page-list"><div class="sidebar-empty">打开文件后<br>在这里切换页面</div></div>
+      <div class="local-note"><span class="local-dot"></span> 本机处理，无需账号<small>鼠标 · 触控 · 手写笔</small><button id="check-update" class="subtle" hidden>检查更新</button><small id="app-version" hidden></small></div>
+    </aside>
+    <section class="editor">
+      <div class="toolbar" aria-label="手写工具">
+        <div class="tool-group modes" role="group" aria-label="工具">
+          <button id="tool-pen" class="tool active" data-tool="pen" title="手写 (P)" aria-pressed="true"><svg viewBox="0 0 24 24"><path d="M14 5l5 5M4 20l5-1L21 7a2 2 0 0 0-5-5L4 14z"/></svg><span>手写</span></button>
+          <button id="tool-eraser" class="tool" data-tool="eraser" title="整笔擦除 (E)" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M9 20l-6-6L15 2l7 7-11 11H9zM8 9l7 7M11 20h11"/></svg><span>橡皮</span></button>
+          <button id="tool-pan" class="tool" data-tool="pan" title="移动纸面 (H)，按住空格临时移动" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M8 12V5a2 2 0 0 1 4 0v7-9a2 2 0 0 1 4 0v9-7a2 2 0 0 1 4 0v9c0 5-3 8-7 8-3 0-5-2-7-5l-3-5c-1-2 1-3 3-1l2 2"/></svg><span>移动</span></button>
+        </div>
+        <div class="tool-group ink-controls">
+          <div class="colors" role="group" aria-label="笔迹颜色">
+            <button class="color active" data-color="#202b35" style="--swatch:#202b35" aria-label="黑色" aria-pressed="true"></button>
+            <button class="color" data-color="#235bc2" style="--swatch:#235bc2" aria-label="蓝色" aria-pressed="false"></button>
+            <button class="color" data-color="#bb3d35" style="--swatch:#bb3d35" aria-label="红色" aria-pressed="false"></button>
+          </div>
+          <label class="width-control">粗细 <input id="pen-width" type="range" min="0.7" max="6" step="0.1" value="1.6"><output id="width-value">1.6</output></label>
+        </div>
+        <div class="tool-group history"><button id="undo" class="icon-button" title="撤销 (⌘/Ctrl+Z)" aria-label="撤销" disabled>↶</button><button id="redo" class="icon-button" title="重做 (⌘/Ctrl+Shift+Z)" aria-label="重做" disabled>↷</button><button id="clear-page" class="subtle" disabled>清空本页</button></div>
+        <label class="pen-only"><input id="pen-only" type="checkbox">仅手写笔</label>
+        <div class="tool-group zoom"><button id="zoom-out" class="icon-button" aria-label="缩小" disabled>−</button><button id="zoom-value" title="点击适合宽度" disabled>100%</button><button id="zoom-in" class="icon-button" aria-label="放大" disabled>+</button><button id="fit-width" class="subtle" disabled>适合宽度</button></div>
+      </div>
+      <div id="viewport" class="viewport">
+        <div id="welcome" class="welcome">
+          <div class="paper-illustration" aria-hidden="true"><span>01</span><i></i><i></i><i></i><svg viewBox="0 0 160 70"><path d="M8 51q22-60 34-33t-15 32q32-23 43-22t-4 20q25-38 32-27t-7 27q37-15 55-10"/></svg></div>
+          <p class="eyebrow">把笔落在 PDF 上</p><h1>打开试卷，直接手写。</h1><p class="welcome-copy">填写答案、勾选选项、签下姓名。<br>像在纸上一样书写，也能随时撤销。</p>
+          <button id="welcome-open" class="primary large">选择 PDF 文件 <span aria-hidden="true">↗</span></button>
+          <span class="drop-note">也可以把 PDF 或草稿拖到这里</span>
+          <div class="welcome-foot"><span>① 打开文件</span><span>② 直接书写</span><span>③ 导出答卷</span></div>
+        </div>
+        <div id="paper-wrap" class="paper-wrap" hidden><div id="paper" class="paper"><canvas id="pdf-canvas" aria-label="PDF 原始页面"></canvas><svg id="ink-layer" xmlns="http://www.w3.org/2000/svg" aria-label="手写区域"><g id="strokes"></g><g id="preview"></g></svg></div></div>
+        <div id="drop-overlay" class="drop-overlay" hidden>松开，打开文件</div>
+      </div>
+      <footer class="statusbar"><span id="tool-help">手写模式可直接落笔；橡皮只擦除新增笔迹。</span><span id="page-status">尚未打开文件</span></footer>
+    </section>
+  </main>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="confirm-dialog"><form method="dialog"><h2 id="confirm-title">确认操作</h2><p id="confirm-message"></p><div class="dialog-actions"><button value="cancel">取消</button><button value="confirm" class="primary">继续</button></div></form></dialog>
+  <dialog id="update-dialog"><h2>软件更新</h2><p id="update-status" aria-live="polite"></p><p id="update-notes"></p><div class="dialog-actions"><button id="update-close">关闭</button><button id="update-release" hidden>查看版本</button><button id="update-download" class="primary" hidden>下载新版</button></div></dialog>
+  <div id="busy" class="busy" role="status" hidden><div><span class="spinner"></span><span id="busy-text">正在打开 PDF…</span></div></div>
+</body>
+</html>

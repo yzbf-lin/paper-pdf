@@ -1,0 +1,48 @@
+{
+  "integrity_note": "SHA-256 对应随本应用分发的本地文件。",
+  "files": [
+    {
+      "file": "pdf.min.js",
+      "package": "pdfjs-dist",
+      "version": "2.3.200",
+      "source": "https://unpkg.com/pdfjs-dist@2.3.200/build/pdf.min.js",
+      "sha256": "27867c1618f63084d46a43106ad92a39576daa87549701ed43f7b2e9f4acb9d1",
+      "bytes": 342273,
+      "license": "Apache-2.0",
+      "license_file": "LICENSE-PDFJS.txt",
+      "license_source": "https://unpkg.com/pdfjs-dist@2.3.200/LICENSE"
+    },
+    {
+      "file": "pdf.worker.min.js",
+      "package": "pdfjs-dist",
+      "version": "2.3.200",
+      "source": "https://unpkg.com/pdfjs-dist@2.3.200/build/pdf.worker.min.js",
+      "sha256": "238a3c909e502310283fdc7bd8e52e82f075263979b6b73d5e51362cf279a39a",
+      "bytes": 785613,
+      "license": "Apache-2.0",
+      "license_file": "LICENSE-PDFJS.txt",
+      "license_source": "https://unpkg.com/pdfjs-dist@2.3.200/LICENSE"
+    },
+    {
+      "file": "pdf-lib.min.js",
+      "package": "pdf-lib",
+      "version": "1.17.1",
+      "source": "https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js",
+      "sha256": "0f9a5cad07941f0826586c94e089d89b918c46e5c17cf2d5a3c6f666e3bc694f",
+      "bytes": 525099,
+      "license": "MIT",
+      "license_file": "LICENSE-PDFLIB.txt",
+      "license_source": "https://unpkg.com/pdf-lib@1.17.1/LICENSE.md"
+    }
+  ],
+  "adapted_source": {
+    "local": "../src/pdf.js",
+    "upstream": "https://github.com/ShizukuIchi/pdf-editor/blob/master/src/utils/PDF.js",
+    "license": "MIT",
+    "license_file": "../upstream/LICENSE",
+    "changes": [
+      "直接在页面绘制向量笔迹",
+      "旋转页面与裁剪区域坐标转换"
+    ]
+  }
+}

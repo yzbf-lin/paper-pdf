@@ -1,0 +1,24 @@
+本地 PDF 手写答题 — 第三方来源与署名
+
+ShizukuIchi/pdf-editor
+项目：https://github.com/ShizukuIchi/pdf-editor
+Copyright (c) 2020 ShizukuIchi
+许可证：MIT；完整正文保留在 ../upstream/LICENSE。
+本应用 src/pdf.js 改编自上游 src/utils/PDF.js；沿用读取原始 PDF、
+添加向量笔迹并导出副本的方式，新增旋转页面与裁剪区域的坐标转换。
+原始上游源码保留在 ../upstream/。
+
+PDF.js / pdfjs-dist 2.3.200
+项目：https://github.com/mozilla/pdf.js
+分发文件：pdf.min.js、pdf.worker.min.js
+许可证：Apache License 2.0；完整正文见 LICENSE-PDFJS.txt。
+主脚本与 worker 使用同一版本，避免渲染协议不一致。
+
+PDF-lib 1.17.1
+项目：https://github.com/Hopding/pdf-lib
+Copyright (c) 2019 Andrew Dillon
+分发文件：pdf-lib.min.js
+许可证：MIT；完整正文见 LICENSE-PDFLIB.txt。
+
+各文件的公开下载地址与本地 SHA-256 见 SOURCES.json。
+本文件是本应用的来源说明，不替代各项目的完整许可证。

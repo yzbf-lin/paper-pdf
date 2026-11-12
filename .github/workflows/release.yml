@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            platform: darwin
+            arch: arm64
+            target: macOS-arm64
+            executable: build/Paper PDF-darwin-arm64/Paper PDF.app/Contents/MacOS/Paper PDF
+          - os: windows-2025
+            platform: win32
+            arch: x64
+            target: Windows-x64
+            executable: build/Paper PDF-win32-x64/Paper PDF.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+      - name: Validate release version and runner
+        env:
+          EXPECTED_PLATFORM: ${{ matrix.platform }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: >-
+          node --input-type=module -e "import fs from 'node:fs';
+          const p=JSON.parse(fs.readFileSync('package.json','utf8'));
+          if(!/^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$/.test(p.version))throw new Error('Invalid version');
+          if(process.env.GITHUB_REF_TYPE==='tag'&&process.env.GITHUB_REF_NAME!=='v'+p.version)throw new Error('Tag does not match package version');
+          if(process.platform!==process.env.EXPECTED_PLATFORM||process.arch!==process.env.EXPECTED_ARCH)throw new Error('Unexpected runner architecture');
+          console.log('Building version '+p.version);"
+      - name: Install dependencies
+        run: npm ci
+      - name: Ensure Electron runtime is installed
+        run: node node_modules/electron/install.js
+      - name: Run tests
+        run: npm test
+      - name: Build application and ZIP
+        run: npm run build -- --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
+      - name: Smoke-test packaged desktop
+        env:
+          PAPER_PDF_EXECUTABLE: ${{ matrix.executable }}
+        run: npm run test:desktop
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: paper-pdf-${{ matrix.target }}
+          path: release/Paper-PDF-*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish signed GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: paper-pdf-*
+          merge-multiple: true
+          path: release
+      - name: Create and verify signed update manifest
+        env:
+          PAPER_PDF_UPDATE_PRIVATE_KEY_B64: ${{ secrets.PAPER_PDF_UPDATE_PRIVATE_KEY_B64 }}
+        run: node scripts/release-manifest.mjs --tag "$GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          RELEASE_STATE="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+          if [[ "$RELEASE_STATE" == "false" ]]; then
+            echo "Published release $GITHUB_REF_NAME already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+          if [[ "$RELEASE_STATE" != "true" ]]; then
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --notes-file RELEASE_NOTES.md --title "Paper PDF $GITHUB_REF_NAME"
+          fi
+          gh release upload "$GITHUB_REF_NAME" \
+            release/Paper-PDF-*.zip release/latest-update.json \
+            release/latest-update.json.sig release/SHA256SUMS.txt --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest --verify-tag
